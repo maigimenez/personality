@@ -16,6 +16,17 @@ def cnn_model(vocab_sorted, sequence_length, embedding_dim, num_filters, filters
         input_shape = (sequence_length, embedding_dim)
         model_input = Input(shape=input_shape)
         embedding_input = model_input
+
+    elif model_variation == "CNN-pre_static":
+        input_shape = (sequence_length,)
+        model_input = Input(shape=input_shape)
+        embedding_input = Embedding(len(vocab_sorted), embedding_dim, input_length=sequence_length,
+                                    weights=embedding_weights, trainable=False)(model_input)
+    elif model_variation == "CNN-pre_static_trainable":
+        input_shape = (sequence_length,)
+        model_input = Input(shape=input_shape)
+        embedding_input = Embedding(len(vocab_sorted), embedding_dim, input_length=sequence_length,
+                                    weights=embedding_weights, trainable=True)(model_input)
     else:
         input_shape = (sequence_length,)
         model_input = Input(shape=input_shape)

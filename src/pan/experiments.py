@@ -1,14 +1,23 @@
 from os.path import join
 import numpy as np
+import argparse
 from math import sqrt
 from sklearn.metrics import mean_squared_error
 
 from utils import *
 from cnn import cnn_model
 
+def get_parameters():
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('--dataset', metavar='PATH', type=str, dest='dataset',
+                        help='Path where the PAN Personality dataset is located',
+                        required=True)
+    args = parser.parse_args()
+    return args.dataset
 
-def load_data():
-    PAN_DATASET = "/Users/maite/Dev/corpora/PAN/"
+
+def load_data(path_dataset):
+    PAN_DATASET = path_dataset
     DATASET_FILEPATH = join(PAN_DATASET, "pan15-author-profiling-training-dataset-english-2015-04-23")
     TRUTH_FILEPATH = join(DATASET_FILEPATH, "truth.txt")
     training_dataset = load_dataset(DATASET_FILEPATH, TRUTH_FILEPATH)
@@ -63,27 +72,66 @@ def prepare_data(x_train, x_test, lookup):
     return x_train_idx, x_test_idx
 
 
-def classification(seq_len, vocab_sorted, x_train_idx, x_test_idx,
-                   oneh_train, oneh_test, trait, encoder, verbose):
+def load_glove(embedding_dim, vocab_sorted):
+    GLOVE_DIR = "../../res/glove.6B"
+    embeddings_index = {}
+    with open(join(GLOVE_DIR, 'glove.6B.' + str(embedding_dim) + 'd.txt')) as f:
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
 
-    model_variation = 'CNN-rand'  # CNN-rand | CNN-non-static | CNN-static
-    print('Model variation is %s' % model_variation)
+    print('Found {} word vectors.'.format(len(embeddings_index)))
+
+    glove_w = np.zeros((len(vocab_sorted), embedding_dim))
+    for word, index in lookup.items():
+        if word in embeddings_index:
+            glove_w[index] = embeddings_index[word]
+        else:
+            np.random.uniform(-0.25, 0.25, embedding_dim)
+
+    return glove_w
+
+
+def grid_search_params():
+    parameters = {'model_variation': None, 'embedding_dim': None,
+                  'num_filters': None, 'filters_h': None}
+    embeddings = [50, 100, 200, 300]
+    num_filters = [50, 100, 300]
+    filters_h = [(3, 5, 7), (1, 2, 3, 4, 5, 6), (2, 3, 6, 9)]
+    variations = ['CNN-pre_static', 'CNN-pre_static_trainable']
+    for m in variations:
+        for e in embeddings:
+            for nf in num_filters:
+                for f in filters_h:
+                    parameters['model_variation'] = m
+                    parameters['embedding_dim'] = e
+                    parameters['num_filters'] = nf
+                    parameters['filters_h'] = f
+
+                    yield parameters
+
+
+def classification(seq_len, vocab_sorted, x_train_idx, x_test_idx,
+                   oneh_train, oneh_test, trait, encoder, params, glove_w,
+                   verbose):
+
+    print('Model variation is {}'.format(params['model_variation']))
 
     # Model Hyperparameters
     sequence_length = seq_len
-    embedding_dim = 50
-    num_filters = 100
     dropout_prob = (0.25, 0.5)
     hidden_dims = (1024, 128)
-    filters_h = (1, 3, 4, 5, 7)
 
     batch_size = 100
     num_epochs = 10
-    output_classes = 9 if trait!='open' else 8
+    output_classes = 9 if trait != 'open' else 8
 
-    model = cnn_model(vocab_sorted, sequence_length, embedding_dim,
-                      num_filters, filters_h, model_variation,
-                      dropout_prob, hidden_dims, output_classes, verbose)
+    model = cnn_model(vocab_sorted, sequence_length, params['embedding_dim'],
+                      params['num_filters'], params['filters_h'],
+                      params['model_variation'], dropout_prob,
+                      hidden_dims, output_classes, verbose, [glove_w])
 
     # model.fit(x_train_idx[:13000], oneh_train[:13000],
     #           batch_size=batch_size, epochs=num_epochs,
@@ -111,9 +159,10 @@ def rmse_grouped(trait, predictions, tweets_user, test_grouped):
 
 if __name__ == "__main__":
     np.random.seed(2)
-
+    path_dataset = get_parameters()
+    print(path_dataset, type(path_dataset))
     # Load the datasets to train and test the models
-    training_dataset, test_dataset = load_data()
+    training_dataset, test_dataset = load_data(path_dataset)
     x_train, x_test, tweets_user = read_tweets(training_dataset, test_dataset)
     # Get the length of the sequence. Since it's padded, each sentence has the same length.
     seq_len = len(x_train[0])
@@ -123,22 +172,34 @@ if __name__ == "__main__":
     x_train_idx, x_test_idx, = prepare_data(x_train, x_test, lookup)
 
     traits = ['extroverted', 'stable', 'agreeable', 'conscientious', 'open']
-    rmses = []
+
     verbose = True
-    for trait in traits:
-        oh_train, oh_test, test_grouped, encoder = encode_trait(trait,
-                                                                training_dataset,
-                                                                test_dataset)
+    for params in grid_search_params():
+        glove_w = load_glove(params['embedding_dim'], vocab)
+        rmses = []
+        for trait in traits:
+            oh_train, oh_test, test_grouped, encoder = encode_trait(trait,
+                                                                    training_dataset,
+                                                                    test_dataset)
+            predictions = classification(seq_len, vocab, x_train_idx, x_test_idx,
+                                         oh_train, oh_test, trait, encoder, params,
+                                         glove_w, verbose)
+            rmses.append(rmse_grouped(trait, predictions, tweets_user, test_grouped))
+            verbose = False
 
-        predictions = classification(seq_len, vocab, x_train_idx, x_test_idx,
-                                     oh_train, oh_test, trait, encoder, verbose)
-        rmses.append(rmse_grouped(trait, predictions, tweets_user, test_grouped))
-        verbose = False
+        mean_rmse = np.mean(np.array(rmses))
+        print("The mean RMSE of the system is {:.4f}\n".format(mean_rmse))
+        if mean_rmse < 0.16:
+            with open('rmses.txt', 'a') as res_file:
+                res_file.write("\n---------------------------------------------------------------\n")
 
-    print("The RMSE for the individual traits are:")
-    for tr_pos, trait in enumerate(traits):
-        print("    - Trait {} is {:.4f}".format(trait.upper(), rmses[tr_pos]))
-    print("The mean RMSE of the system is {:.4f}".format(np.mean(np.array(rmses))))
+                res_file.write("\nThe RMSE for the individual traits are:")
+                for tr_pos, trait in enumerate(traits):
+                    res_file.write("    - Trait {} is {:.4f}\n".format(trait.upper(), rmses[tr_pos]))
+                res_file.write("\nThe mean RMSE of the system is {:.4f}\n".format(mean_rmse))
 
+                res_file.write("\n The parameters used were:")
+                for k, v in params.items():
+                    res_file.write("    - Param {}: {:}\n".format(k, v))
 
-
+                res_file.write("\n---------------------------------------------------------------\n\n")
