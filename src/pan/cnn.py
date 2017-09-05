@@ -54,7 +54,8 @@ def cnn_model(vocab_sorted, sequence_length, embedding_dim, num_filters, filters
 
     h1 = Dense(hidden_dims[0], activation="relu")(dropout_cnn)
     h2 = Dense(hidden_dims[1], activation="relu")(h1)
-    model_output = Dense(output_neurons, activation="sigmoid")(h2)
+    h3 = Dense(hidden_dims[2], activation="relu")(h2)
+    model_output = Dense(output_neurons, activation="sigmoid")(h3)
 
     model = Model(inputs=model_input, outputs=model_output)
 

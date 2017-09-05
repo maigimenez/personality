@@ -97,10 +97,10 @@ def load_glove(embedding_dim, vocab_sorted):
 def grid_search_params():
     parameters = {'model_variation': None, 'embedding_dim': None,
                   'num_filters': None, 'filters_h': None}
-    embeddings = [50, 100, 200, 300]
+    embeddings = [300]
     num_filters = [50, 100, 300]
     filters_h = [(3, 5, 7), (1, 2, 3, 4, 5, 6), (2, 3, 6, 9)]
-    variations = ['CNN-pre_static', 'CNN-pre_static_trainable']
+    variations = ['CNN-pre_static_trainable']
     for m in variations:
         for e in embeddings:
             for nf in num_filters:
@@ -122,10 +122,10 @@ def classification(seq_len, vocab_sorted, x_train_idx, x_test_idx,
     # Model Hyperparameters
     sequence_length = seq_len
     dropout_prob = (0.25, 0.5)
-    hidden_dims = (1024, 128)
+    hidden_dims = (1024, 128, 64)
 
     batch_size = 100
-    num_epochs = 10
+    num_epochs = 9
     output_classes = 9 if trait != 'open' else 8
 
     model = cnn_model(vocab_sorted, sequence_length, params['embedding_dim'],
